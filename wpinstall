@@ -4,7 +4,7 @@ mysql_user=root
 mysql_pass=root
 
 wp_user='admin'
-wp_admin_email='admin@expample.com'
+wp_admin_email='admin@example.com'
 
 # parse the current directory name
 currentdirectory=${PWD##*/}
