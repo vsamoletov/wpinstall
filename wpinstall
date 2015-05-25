@@ -1,0 +1,145 @@
+#!/bin/bash -e
+
+mysql_user=root
+mysql_pass=root
+
+wp_user='admin'
+wp_admin_email='admin@expample.com'
+
+# parse the current directory name
+currentdirectory=${PWD##*/}
+
+clear
+
+echo "================================================================="
+echo "================== Awesome WordPress Installer =================="
+echo "================================================================="
+
+# accept the name of our website
+echo -n "Site Name [$currentdirectory]: "
+read -e sitename
+if [ "$sitename" == '' ] ; then
+	sitename=${currentdirectory}
+fi
+
+# accept user input for the databse name
+echo -n "Database Name [${currentdirectory//./_}]: "
+read -e dbname
+if [ "$dbname" == '' ] ; then
+	dbname=${currentdirectory//./_}
+fi
+
+# accept a comma separated list of pages
+echo -n "Add Pages: "
+read -e allpages
+
+# add a simple yes/no confirmation before we proceed
+echo -n "Run Install [y]? (y/n)"
+read -e run
+if [ "$run" == '' ] ; then
+	run="y"
+fi
+
+# if the user didn't say yes - halt
+if [ "$run" != "y" ] ; then
+	exit
+fi
+
+# download the WordPress core files
+wp core download
+
+# create the wp-config file with our standard setup
+wp core config --dbhost="127.0.0.1" --dbname=$dbname --dbuser=$mysql_user --dbpass=$mysql_pass --locale=en_US --extra-php <<PHP
+/* Stay on the same hostname */
+define( 'WP_SITEURL',	'http://' . \$_SERVER['HTTP_HOST']);
+define( 'WP_HOME',		'http://' . \$_SERVER['HTTP_HOST']);
+
+define( 'WP_LANG', 'en_US' );
+
+#define( 'FS_METHOD', 'direct');
+#define( 'WP_DEBUG', true );
+PHP
+
+# generate random 12 character password
+password=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 12)
+
+# copy password to clipboard
+echo $password | pbcopy
+
+# create database, and install WordPress
+wp db create
+wp core install --url="http://$sitename/" --title="$sitename" --admin_user="$wp_user" --admin_password="$password" --admin_email="$wp_admin_email"
+
+# discourage search engines
+wp option update blog_public 0
+
+# show only 6 posts on an archive page
+#wp option update posts_per_page 6
+
+# delete sample page, and create homepage
+wp comment delete $(wp comment list --format=ids)
+wp post delete $(wp post list --post_type=page --posts_per_page=1 --post_status=publish --field=ID --format=ids)
+wp post delete $(wp post list --post_type=post --posts_per_page=1 --post_status=publish --field=ID --format=ids)
+wp post create --post_type=page --post_title=Home --post_status=publish --post_author=$(wp user get $wp_user --field=ID --format=ids)
+
+# set homepage as front page
+wp option update show_on_front 'page'
+
+# set homepage to be the new page
+wp option update page_on_front $(wp post list --post_type=page --post_status=publish --posts_per_page=1 --pagename=home --field=ID --format=ids)
+
+# create all of the pages
+export IFS=","
+for page in $allpages; do
+	wp post create --post_type=page --post_status=publish --post_author=$(wp user get $wp_user --field=ID --format=ids) --post_title="$(echo $page | sed -e 's/^ *//' -e 's/ *$//')"
+done
+
+# set pretty urls
+wp rewrite structure '/%postname%/' --hard
+wp rewrite flush --hard
+
+# delete akismet and hello dolly
+wp plugin delete akismet
+wp plugin delete hello
+
+# install lt-tables plugin
+#wp plugin install https://github.com/ltconsulting/lt-tables/archive/master.zip --activate
+
+# install antispam plugin
+#wp plugin install antispam-bee --activate
+
+# themes cleanup
+wp theme delete $(wp theme list --status=inactive --field=name)
+
+# install the company starter theme
+#wp theme install ~/Documents/lt-theme.zip --activate
+
+#clear
+
+# create a navigation bar
+wp menu create "Main Navigation"
+
+# add pages to navigation
+export IFS=" "
+for pageid in $(wp post list --order="ASC" --orderby="date" --post_type=page --post_status=publish --posts_per_page=-1 --field=ID --format=ids); do
+	wp menu item add-post main-navigation $pageid
+done
+
+# assign navigaiton to primary location
+wp menu location assign main-navigation primary
+
+#clear
+
+echo "================================================================="
+echo "Installation is complete. Your username/password is listed below."
+echo ""
+echo "Username: $wp_user"
+echo "Password: $password"
+echo ""
+echo "================================================================="
+
+# Open the new website with Google Chrome
+/usr/bin/open -a "/Applications/Google Chrome.app" "http://$sitename/wp-login.php"
+
+# Open the project in TextMate
+#/Applications/TextMate.app/Contents/Resources/mate /Applications/MAMP/htdocs/$currentdirectory/wp-content/themes/lt-theme
